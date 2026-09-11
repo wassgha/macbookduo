@@ -11,3 +11,6 @@ yarn-error.log*
 !.env.example
 next-env.d.ts
 tsconfig.tsbuildinfo
+
+# built by native/lid-angle/build.sh
+native/lid-angle/bin/
