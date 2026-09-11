@@ -5,8 +5,9 @@ angle as you move the MacBook's lid — so it reads as a panel standing perpendi
 the keyboard rather than as wallpaper stuck to the display. Movement blurs it,
 progressively, and it settles back when you stop.
 
-Needs a MacBook with a lid angle sensor (2019 16-inch MacBook Pro and most laptops since)
-and the Swift command line tools.
+Needs a MacBook with a lid angle sensor — the 2019 16-inch MacBook Pro and most laptops
+since. The angle can come from either of two places, see below; the helper wants the
+Swift command line tools.
 
 React is pinned to 19.2.x: `@react-three/fiber@9.7.0` declares `react >=19 <19.3`, so
 19.3 fails to install without `--legacy-peer-deps`, which is a deployment waiting to
@@ -37,12 +38,29 @@ fullscreen.
 The angle is also logged to the browser console, and
 `npm run lid-angle -- --once` prints it in the terminal.
 
+## Two ways to read the sensor
+
+**WebHID**, in the browser, with nothing installed. Chromium can open the same HID device
+the helper does and pull the same feature report, which is the only thing that can work
+in a deployment — there is no helper process to run on a server. The costs are that it is
+Chromium-only, so no Safari and no Firefox, and that the browser will not hand over a HID
+device without the user picking it from a chooser. Hence the Connect button, which
+appears only while nothing is supplying readings. The grant is remembered per origin, so
+it is asked once.
+
+**The helper**, over Server-Sent Events. No click, no browser restrictions, and it works
+while iterating locally, which is why it is the fallback rather than the other way round.
+
+`useLidAngle` prefers an existing WebHID grant, falls back to the stream, and offers the
+chooser if neither produced a reading.
+
 ## Working on it without touching the lid
 
 | URL | Does |
 | --- | --- |
 | `/?lid=95` | Pins the angle to 95° and never opens the stream. |
 | `/?lid=105&fold=40` | Pins 105°, then moves to 65° and holds there. |
+| `/?hid=1` | Skips the stream, so the WebHID path can be tried where the helper would answer first. |
 
 The second one is the equivalent of lid-plane's "Simulate a Fold" and the only way to
 keep the effect still long enough to screenshot it.
