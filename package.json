@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "build:native": "./native/lid-angle/build.sh",
+    "lid-angle": "./native/lid-angle/bin/lid-angle"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",
