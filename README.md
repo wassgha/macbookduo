@@ -8,6 +8,10 @@ progressively, and it settles back when you stop.
 Needs a MacBook with a lid angle sensor (2019 16-inch MacBook Pro and most laptops since)
 and the Swift command line tools.
 
+React is pinned to 19.2.x: `@react-three/fiber@9.7.0` declares `react >=19 <19.3`, so
+19.3 fails to install without `--legacy-peer-deps`, which is a deployment waiting to
+break. Widen it when fiber ships a release that allows 19.3.
+
 ```sh
 npm install
 npm run build:native   # the Swift helper that reads the sensor
