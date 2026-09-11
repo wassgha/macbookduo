@@ -14,7 +14,7 @@ npm run build:native   # the Swift helper that reads the sensor
 npm run dev
 ```
 
-Then move the lid, gently. Keep the base and your head still — the illusion assumes both.
+The effect only runs in the closing direction — see below. Then move the lid, gently. Keep the base and your head still — the illusion assumes both.
 It also assumes the browser viewport is the whole display, so it is at its best in
 fullscreen.
 
@@ -63,6 +63,22 @@ effects:
 `EYE` in `components/LidPlane.tsx` is the assumed viewing position, in display heights.
 There is no head tracking, so it is a guess, and it is the knob that sets how strong the
 effect is.
+
+## Why it only holds while closing
+
+The warp is not symmetric. Closing tilts the display towards you, the image keystones
+away from you, and it reads as content standing still while the display moves around it.
+Opening tilts the display away, which puts the anchored content plane between you and
+the display: the rays converge instead, the keystone inverts, and the image just swells
+and blurs. So `LidHold` in `components/lidAnchor.ts` renders nothing when the lid opens
+wider than the anchor.
+
+It also stops the anchor settling once the lid is shut past `closedBelow` (45°), where
+the screen is not really visible any more. Otherwise the anchor would pin the content to
+a plane nobody ever looked at, and opening the lid again would have to render that
+inverted warp, saturated, for the whole sweep. Holding the anchor instead means opening
+back up unwinds the same warp that closing built, reaching flat exactly as the lid
+returns to where it started.
 
 ## Credit
 

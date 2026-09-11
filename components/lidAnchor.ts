@@ -80,3 +80,49 @@ export class LidAnchor {
     if (progress === 1) this.settlingSince = null;
   }
 }
+
+/**
+ * Decides how far the content is being held from where the lid is now.
+ *
+ * Wraps the anchor with two rules that are ours, not lid-plane's, both consequences of
+ * the warp not being symmetric. Closing tilts the display towards the viewer, so rays
+ * through the top of it travel further, the image keystones away, and it reads as
+ * content standing still while the display moves. Opening tilts the display away, which
+ * puts the anchored content plane between the viewer and the display: the rays converge
+ * instead, the keystone inverts, and the image just swells and blurs.
+ *
+ * 1. **Only the closing direction is held.** Opening wider than the anchor renders
+ *    nothing rather than that inverted warp.
+ * 2. **The anchor holds while the lid is shut.** Below {@link closedBelow} the screen is
+ *    not really visible, so letting the anchor settle there would pin the content to a
+ *    plane nobody ever looked at — and opening up again would then have to render the
+ *    inverted warp, saturated, for the whole sweep. Holding the anchor instead means
+ *    opening back up unwinds the very warp that closing built, in the direction that
+ *    reads correctly, reaching flat exactly as the lid returns to where it started.
+ */
+export class LidHold {
+  /** Below this the lid counts as shut rather than at a working angle, in degrees. */
+  closedBelow = 45;
+
+  private readonly anchor: LidAnchor;
+
+  constructor(angle: number, now: number) {
+    this.anchor = new LidAnchor(angle, now);
+  }
+
+  /** The angle the content is pinned to, in degrees. */
+  get reference() {
+    return this.anchor.reference;
+  }
+
+  /**
+   * Advance by one frame.
+   *
+   * @param now - monotonic seconds.
+   * @returns how far to warp, in degrees. Never negative; zero means flat.
+   */
+  update(angle: number, now: number, autoAnchor: boolean): number {
+    this.anchor.update(angle, now, autoAnchor && angle >= this.closedBelow);
+    return Math.max(0, this.anchor.reference - angle);
+  }
+}

@@ -5,7 +5,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useTexture } from "@react-three/drei";
 import * as THREE from "three";
 
-import { LidAnchor } from "./lidAnchor";
+import { LidHold } from "./lidAnchor";
 import { blurSigmas, buildBlurPyramid } from "./blurPyramid";
 
 /**
@@ -264,16 +264,17 @@ export function LidPlane({
     material.uniforms.uHold.value = hold ? (perspective ? 2 : 1) : 0;
   }, [blur, hold, perspective, material]);
 
-  const anchor = useRef<LidAnchor | null>(null);
+  const lidHold = useRef<LidHold | null>(null);
   const target = useRef(0);
 
   useFrame((state, dt) => {
     const angle = angleRef.current;
     if (angle !== null) {
       const now = state.clock.elapsedTime;
-      anchor.current ??= new LidAnchor(angle, now);
-      anchor.current.update(angle, now, autoAnchor);
-      target.current = THREE.MathUtils.degToRad(anchor.current.reference - angle);
+      lidHold.current ??= new LidHold(angle, now);
+      target.current = THREE.MathUtils.degToRad(
+        lidHold.current.update(angle, now, autoAnchor),
+      );
     }
 
     // Ease towards the sensor rather than following it directly: the readings are whole
