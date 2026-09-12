@@ -46,7 +46,9 @@ export async function GET(request: Request) {
       };
 
       if (!existsSync(/*turbopackIgnore: true*/ binary)) {
-        fail(`lid-angle helper not found at ${binary} — build it with \`npm run build:native\`.`);
+        // Just the fact. What to do about it depends on the browser at the other end,
+        // which only the client can see — a deployment has no helper to build.
+        fail(`no lid-angle helper at ${binary}`);
         return;
       }
 

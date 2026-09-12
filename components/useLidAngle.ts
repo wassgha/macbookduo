@@ -99,9 +99,8 @@ export function useLidAngle({ log = false }: { log?: boolean } = {}): LidAngleSu
     requestSensor()
       .then((device) => {
         if (!device) {
-          const message = "No lid angle sensor came back from the chooser.";
-          console.warn(`[lid-angle] ${message}`);
-          setError(message);
+          // openAnswering and requestSensor have already logged the specifics.
+          setError("The lid angle sensor did not answer over WebHID.");
           return;
         }
         stopHid.current?.();
@@ -171,7 +170,10 @@ export function useLidAngle({ log = false }: { log?: boolean } = {}): LidAngleSu
       // route that is going to fail the same way, so stop listening.
       stream.addEventListener("sensor-error", (event) => {
         const { message } = JSON.parse(event.data) as { message: string };
-        console.warn(`[lid-angle] ${message}`);
+        const remedy = webHidAvailable()
+          ? 'use "Connect lid sensor" to read it through the browser instead'
+          : "and this browser has no WebHID, so there is no other way to read it here";
+        console.warn(`[lid-angle] ${message} — ${remedy}.`);
         setError(message);
         stream.close();
       });
