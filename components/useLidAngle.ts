@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 import {
+  listenForAngles,
   openGrantedSensor,
-  pollSensor,
   requestSensor,
   webHidAvailable,
 } from "./lidSensorHid";
@@ -44,9 +44,6 @@ export type LidAngleSubscription = {
 
 /** How long to let the anchor settle on the pinned angle before folding away from it. */
 const simulatedFoldDelay = 400;
-
-/** Polling rate for the WebHID path, in Hz. The stream is paced by the helper instead. */
-const pollRate = 30;
 
 /**
  * Tracks the latest lid angle, from whichever source can supply it.
@@ -104,7 +101,7 @@ export function useLidAngle({ log = false }: { log?: boolean } = {}): LidAngleSu
           return;
         }
         stopHid.current?.();
-        stopHid.current = pollSensor(device, pollRate, track);
+        stopHid.current = listenForAngles(device, track);
       })
       .catch((cause: unknown) => {
         // Dismissing the chooser rejects, so this is a normal outcome, not a fault.
@@ -142,7 +139,7 @@ export function useLidAngle({ log = false }: { log?: boolean } = {}): LidAngleSu
       .then((device) => {
         if (cancelled) return;
         if (device) {
-          stopHid.current = pollSensor(device, pollRate, track);
+          stopHid.current = listenForAngles(device, track);
           source?.close();
           source = null;
           return;

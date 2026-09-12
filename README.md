@@ -40,16 +40,25 @@ The angle is also logged to the browser console, and
 
 ## Two ways to read the sensor
 
-**WebHID**, in the browser, with nothing installed. Chromium can open the same HID device
-the helper does and pull the same feature report, which is the only thing that can work
-in a deployment — there is no helper process to run on a server. The costs are that it is
-Chromium-only, so no Safari and no Firefox, and that the browser will not hand over a HID
-device without the user picking it from a chooser. Hence the Connect button, which
-appears only while nothing is supplying readings. The grant is remembered per origin, so
-it is asked once.
+They do not read the device the same way, and cannot.
 
-**The helper**, over Server-Sent Events. No click, no browser restrictions, and it works
-while iterating locally, which is why it is the fallback rather than the other way round.
+**WebHID**, in the browser, with nothing installed. This is the only thing that can work
+in a deployment — there is no helper process to run on a server. It **subscribes to input
+reports**: report 1 on the sensor collection, which the descriptor declares as a 9-bit
+field of degrees. It cannot poll the way the helper does, because WebHID validates
+against the report descriptor and this device declares no feature report at all
+(`kIOHIDMaxFeatureReportSizeKey` is 1). `receiveFeatureReport` on it always fails with
+"Failed to receive the feature report".
+
+The other costs: Chromium only, so no Safari and no Firefox, and the browser will not
+hand over a HID device without the user picking it from a chooser. Hence the Connect
+button, which appears only while nothing is supplying readings. The grant is remembered
+per origin, so it is asked once.
+
+**The helper**, over Server-Sent Events. It **polls a feature report** that the device
+services even though it never declares it — undocumented, and the reason this path
+exists at all: the device pushes input reports on its own schedule, but a poll gets an
+answer whenever it asks. No click and no browser restrictions either.
 
 `useLidAngle` prefers an existing WebHID grant, falls back to the stream, and offers the
 chooser if neither produced a reading.

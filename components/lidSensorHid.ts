@@ -1,50 +1,75 @@
 /**
  * Reads the lid angle sensor straight from the browser, with no helper process.
  *
- * Chromium's WebHID can open the same device the native helper does and pull the same
- * feature report, which makes the helper optional wherever WebHID exists — including a
- * deployment, where there is no helper to run at all. The catch is that it is
- * Chromium-only (no Safari, no Firefox) and the first read needs a click: the browser
- * will not hand over a HID device without the user picking it from a chooser.
+ * Chromium's WebHID can reach the same device the native helper does, which makes the
+ * helper optional wherever WebHID exists — including a deployment, where there is no
+ * helper to run at all. The costs are that it is Chromium-only (no Safari, no Firefox)
+ * and that the first read needs a click: the browser will not hand over a HID device
+ * without the user picking it from a chooser.
+ *
+ * It does not read the device the way the helper does, and it cannot. The helper polls a
+ * *feature* report, which works because IOKit will service that request even though the
+ * device never declares such a report — `kIOHIDMaxFeatureReportSizeKey` on this
+ * interface is 1, i.e. nothing beyond a report ID. WebHID validates reports against the
+ * report descriptor, so `receiveFeatureReport` on it always fails with "Failed to receive
+ * the feature report".
+ *
+ * What the descriptor does declare is the angle as an *input* report:
+ *
+ *     05 20        Usage Page (Sensors)
+ *     09 8a        Usage (Orientation)
+ *     a1 01        Collection (Application)
+ *     85 01        Report ID (1)
+ *     0a 7f 04     Usage (0x047f)
+ *     46 68 01     Physical Maximum (360)
+ *     26 68 01     Logical Maximum (360)
+ *     75 09        Report Size (9 bits)
+ *     95 01        Report Count (1)
+ *     81 02        INPUT (Data, Variable, Absolute)
+ *
+ * So the browser subscribes instead of polling. The device pushes about once a second
+ * while the lid is still, and faster while it moves.
  */
 
 /** Apple's vendor ID and the lid sensor's product ID. */
 const lidSensor = { vendorId: 0x05ac, productId: 0x8104 };
 
-/** The sensor answers on feature report 1. */
-const featureReportId = 1;
+/** HID Sensor page, "Orientation" usage: the interface carrying the angle. */
+const sensorCollection = { usagePage: 0x0020, usage: 0x008a };
 
 /**
- * HID Sensor page, "Orientation" usage.
- *
  * Narrow on purpose. This device exposes four HID interfaces — this one plus three
- * vendor-specific (0xFF00) — and only this one answers the feature report; the others
- * return "unsupported". They also carry no product name, so matching on vendor and
- * product alone fills the chooser with four identical "Unknown Device (05AC:8104)" rows,
- * three of which are dead ends.
+ * vendor-specific (0xFF00) — and only this one carries the angle. They have no product
+ * name, so matching on vendor and product alone fills the chooser with four identical
+ * "Unknown Device (05AC:8104)" rows, three of which are dead ends.
  */
-const filters = [{ ...lidSensor, usagePage: 0x0020, usage: 0x008a }];
+const filters = [{ ...lidSensor, ...sensorCollection }];
 
-/** Rejects a decode that landed on the wrong byte; the hinge stops well short of this. */
+/** The angle arrives on report 1. The interface declares others for other properties. */
+const angleReportId = 1;
+
+/** The declared field is 9 bits; the rest of the second byte is padding. */
+const angleMask = 0x1ff;
+
+/** Rejects a decode that landed wrong; the hinge stops well short of this. */
 const implausibleAngle = 200;
+
+/** How long to wait for the device's first push before saying something is wrong. */
+const firstReportTimeout = 3000;
 
 export function webHidAvailable() {
   return typeof navigator !== "undefined" && navigator.hid !== undefined;
 }
 
 /**
- * Decodes the angle in degrees from a feature report, or null if it does not look like
- * one.
+ * Decodes an input report into degrees, or null if it does not look like an angle.
  *
- * Chromium puts the report ID in byte 0 here, unlike `sendFeatureReport` where it is a
- * separate argument, so the little-endian value normally starts at byte 1. That is
- * checked rather than assumed, because reading from the wrong offset yields a number
- * that looks plausible instead of failing.
+ * `HIDInputReportEvent.data` excludes the report ID, so the little-endian value starts
+ * at byte 0 — unlike the helper's feature report, where the ID occupies byte 0.
  */
-export function decodeAngle(report: DataView): number | null {
-  const offset = report.byteLength >= 3 && report.getUint8(0) === featureReportId ? 1 : 0;
-  if (report.byteLength < offset + 2) return null;
-  const degrees = report.getUint16(offset, true);
+export function decodeInputAngle(data: DataView): number | null {
+  if (data.byteLength < 2) return null;
+  const degrees = data.getUint16(0, true) & angleMask;
   return degrees <= implausibleAngle ? degrees : null;
 }
 
@@ -56,48 +81,46 @@ function label(device: HIDDevice) {
   return `${device.productName || "unnamed"} [${usages || "no collections"}]`;
 }
 
+function isSensorInterface(device: HIDDevice) {
+  return (
+    device.vendorId === lidSensor.vendorId &&
+    device.productId === lidSensor.productId &&
+    device.collections.some(
+      (c) => c.usagePage === sensorCollection.usagePage && c.usage === sensorCollection.usage,
+    )
+  );
+}
+
 /**
- * Opens whichever of the given interfaces actually answers.
+ * Picks the sensor interface out of a set of devices and opens it.
  *
- * The filter should mean only one candidate arrives, but a grant can cover an interface's
- * siblings, so this still probes rather than assuming — and says what it found when
- * nothing works, because four indistinguishable devices are impossible to debug blind.
+ * A grant covers every interface on the device, so this has to choose by collection
+ * rather than take the first thing it is handed.
  */
-async function openAnswering(devices: HIDDevice[]): Promise<HIDDevice | null> {
-  const attempts: string[] = [];
-
-  for (const device of devices) {
-    if (device.vendorId !== lidSensor.vendorId || device.productId !== lidSensor.productId) {
-      continue;
+async function openSensorInterface(devices: HIDDevice[]): Promise<HIDDevice | null> {
+  const device = devices.find(isSensorInterface);
+  if (!device) {
+    if (devices.length > 0) {
+      console.warn(
+        `[lid-angle] none of these is the sensor interface: ${devices.map(label).join(", ")}`,
+      );
     }
-    try {
-      if (!device.opened) await device.open();
-      const report = await device.receiveFeatureReport(featureReportId);
-      const bytes = [...new Uint8Array(report.buffer)];
-      const angle = decodeAngle(report);
-      // Requires a non-zero angle, not merely a decodable one: a silent interface can
-      // answer with zeroes, and a lid being looked at is never shut.
-      if (angle !== null && angle > 0) {
-        console.log(`[lid-angle] WebHID reading ${label(device)}, [${bytes}] -> ${angle}°`);
-        return device;
-      }
-      attempts.push(`${label(device)}: replied [${bytes}], no angle in it`);
-      await device.close();
-    } catch (cause) {
-      attempts.push(`${label(device)}: ${cause instanceof Error ? cause.message : cause}`);
-    }
+    return null;
   }
 
-  if (attempts.length > 0) {
-    console.warn(`[lid-angle] no interface answered:\n  ${attempts.join("\n  ")}`);
+  try {
+    if (!device.opened) await device.open();
+    return device;
+  } catch (cause) {
+    console.warn(`[lid-angle] could not open ${label(device)}: ${cause}`);
+    return null;
   }
-  return null;
 }
 
 /** The sensor, if this origin has already been granted it. Never prompts. */
 export async function openGrantedSensor(): Promise<HIDDevice | null> {
   if (!navigator.hid) return null;
-  return openAnswering(await navigator.hid.getDevices());
+  return openSensorInterface(await navigator.hid.getDevices());
 }
 
 /** Shows the chooser and opens what comes back. Must be called from a user gesture. */
@@ -115,43 +138,54 @@ export async function requestSensor(): Promise<HIDDevice | null> {
     return null;
   }
 
-  // Granting one interface can grant its siblings, so everything now on offer is worth a
-  // try: if the chooser handed over a dead end, the answering one is likely beside it.
+  // Granting one interface grants its siblings, so ask again for the full set and pick
+  // the right one out of it rather than trusting whichever row was clicked.
   const granted = await navigator.hid.getDevices();
-  const candidates = [...chosen, ...granted.filter((device) => !chosen.includes(device))];
-  return openAnswering(candidates);
+  return openSensorInterface(granted.length > 0 ? granted : chosen);
 }
 
 /**
- * Polls `device` and reports each angle until the returned function is called.
+ * Reports every angle the device pushes, until the returned function is called.
  *
- * Reads are serialised: at 30 Hz a slow round trip would otherwise queue up behind
- * itself.
+ * The first report is logged with its raw bytes: this is the one assumption that cannot
+ * be checked from here, and a surprise in the layout should be visible rather than show
+ * up as a plausible wrong number.
  */
-export function pollSensor(
+export function listenForAngles(
   device: HIDDevice,
-  hz: number,
   onAngle: (angle: number) => void,
 ): () => void {
-  let stopped = false;
-  let inFlight = false;
+  let first = true;
 
-  const timer = setInterval(async () => {
-    if (inFlight || stopped) return;
-    inFlight = true;
-    try {
-      const angle = decodeAngle(await device.receiveFeatureReport(featureReportId));
-      if (angle !== null && !stopped) onAngle(angle);
-    } catch {
-      // A dropped read is not fatal; the next tick tries again.
-    } finally {
-      inFlight = false;
+  const handler = (event: HIDInputReportEvent) => {
+    if (event.reportId !== angleReportId) return;
+    const angle = decodeInputAngle(event.data);
+    if (angle === null) return;
+
+    if (first) {
+      first = false;
+      const bytes = [...new Uint8Array(event.data.buffer)];
+      console.log(`[lid-angle] WebHID connected to ${label(device)}: [${bytes}] -> ${angle}°`);
     }
-  }, 1000 / hz);
+    onAngle(angle);
+  };
+
+  device.addEventListener("inputreport", handler);
+
+  // The device heartbeats about once a second even when still, so silence means the
+  // subscription is not working rather than that the lid is not moving.
+  const watchdog = setTimeout(() => {
+    if (first) {
+      console.warn(
+        `[lid-angle] no input report from ${label(device)} in ${firstReportTimeout}ms; ` +
+          "it opened but is not pushing reports",
+      );
+    }
+  }, firstReportTimeout);
 
   return () => {
-    stopped = true;
-    clearInterval(timer);
+    clearTimeout(watchdog);
+    device.removeEventListener("inputreport", handler);
     void device.close().catch(() => {});
   };
 }
