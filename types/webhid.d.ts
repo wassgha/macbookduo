@@ -6,8 +6,14 @@
  * dependency. Widen this if more of the API gets used, against
  * https://wicg.github.io/webhid/
  */
+interface HIDCollectionInfo {
+  readonly usagePage: number;
+  readonly usage: number;
+}
+
 interface HIDDevice {
   readonly opened: boolean;
+  readonly collections: readonly HIDCollectionInfo[];
   readonly vendorId: number;
   readonly productId: number;
   readonly productName: string;

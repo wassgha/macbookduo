@@ -14,8 +14,16 @@ const lidSensor = { vendorId: 0x05ac, productId: 0x8104 };
 /** The sensor answers on feature report 1. */
 const featureReportId = 1;
 
-/** HID Sensor page, "Orientation" usage — the interface that carries the angle. */
-const filters = [{ ...lidSensor, usagePage: 0x0020, usage: 0x008a }, { ...lidSensor }];
+/**
+ * HID Sensor page, "Orientation" usage.
+ *
+ * Narrow on purpose. This device exposes four HID interfaces — this one plus three
+ * vendor-specific (0xFF00) — and only this one answers the feature report; the others
+ * return "unsupported". They also carry no product name, so matching on vendor and
+ * product alone fills the chooser with four identical "Unknown Device (05AC:8104)" rows,
+ * three of which are dead ends.
+ */
+const filters = [{ ...lidSensor, usagePage: 0x0020, usage: 0x008a }];
 
 /** Rejects a decode that landed on the wrong byte; the hinge stops well short of this. */
 const implausibleAngle = 200;
@@ -40,13 +48,24 @@ export function decodeAngle(report: DataView): number | null {
   return degrees <= implausibleAngle ? degrees : null;
 }
 
+/** Names an interface for a log line, since these devices have no product name. */
+function label(device: HIDDevice) {
+  const usages = device.collections
+    .map((c) => `${c.usagePage.toString(16)}/${c.usage.toString(16)}`)
+    .join(",");
+  return `${device.productName || "unnamed"} [${usages || "no collections"}]`;
+}
+
 /**
- * Opens whichever of the device's interfaces actually answers.
+ * Opens whichever of the given interfaces actually answers.
  *
- * The same probe the native side has to do: this device exposes four HID interfaces —
- * one on the sensor page and three vendor-specific — and only one returns the report.
+ * The filter should mean only one candidate arrives, but a grant can cover an interface's
+ * siblings, so this still probes rather than assuming — and says what it found when
+ * nothing works, because four indistinguishable devices are impossible to debug blind.
  */
 async function openAnswering(devices: HIDDevice[]): Promise<HIDDevice | null> {
+  const attempts: string[] = [];
+
   for (const device of devices) {
     if (device.vendorId !== lidSensor.vendorId || device.productId !== lidSensor.productId) {
       continue;
@@ -54,20 +73,23 @@ async function openAnswering(devices: HIDDevice[]): Promise<HIDDevice | null> {
     try {
       if (!device.opened) await device.open();
       const report = await device.receiveFeatureReport(featureReportId);
+      const bytes = [...new Uint8Array(report.buffer)];
       const angle = decodeAngle(report);
       // Requires a non-zero angle, not merely a decodable one: a silent interface can
       // answer with zeroes, and a lid being looked at is never shut.
       if (angle !== null && angle > 0) {
-        console.log(
-          `[lid-angle] WebHID reading ${device.productName || "the sensor"}, ` +
-            `report [${[...new Uint8Array(report.buffer)].join(", ")}] -> ${angle}°`,
-        );
+        console.log(`[lid-angle] WebHID reading ${label(device)}, [${bytes}] -> ${angle}°`);
         return device;
       }
+      attempts.push(`${label(device)}: replied [${bytes}], no angle in it`);
       await device.close();
-    } catch {
-      // This interface will not answer. Try the next.
+    } catch (cause) {
+      attempts.push(`${label(device)}: ${cause instanceof Error ? cause.message : cause}`);
     }
+  }
+
+  if (attempts.length > 0) {
+    console.warn(`[lid-angle] no interface answered:\n  ${attempts.join("\n  ")}`);
   }
   return null;
 }
@@ -81,7 +103,23 @@ export async function openGrantedSensor(): Promise<HIDDevice | null> {
 /** Shows the chooser and opens what comes back. Must be called from a user gesture. */
 export async function requestSensor(): Promise<HIDDevice | null> {
   if (!navigator.hid) return null;
-  return openAnswering(await navigator.hid.requestDevice({ filters }));
+
+  const chosen = await navigator.hid.requestDevice({ filters });
+  if (chosen.length === 0) {
+    // Dismissing the chooser rejects instead, so this means it had nothing to offer:
+    // either no sensor on this Mac, or the filter above is too narrow for it.
+    console.warn(
+      "[lid-angle] the chooser offered no device on the sensor page (usage 0x20/0x8a) " +
+        `for ${lidSensor.vendorId.toString(16)}:${lidSensor.productId.toString(16)}`,
+    );
+    return null;
+  }
+
+  // Granting one interface can grant its siblings, so everything now on offer is worth a
+  // try: if the chooser handed over a dead end, the answering one is likely beside it.
+  const granted = await navigator.hid.getDevices();
+  const candidates = [...chosen, ...granted.filter((device) => !chosen.includes(device))];
+  return openAnswering(candidates);
 }
 
 /**
