@@ -16,3 +16,21 @@ body {
   position: fixed;
   inset: 0;
 }
+
+.connect {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  padding: 8px 14px;
+  border: 1px solid rgb(255 255 255 / 0.25);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.35);
+  backdrop-filter: blur(12px);
+  color: #fff;
+  font: 13px/1 -apple-system, system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.connect:hover {
+  background: rgb(0 0 0 / 0.55);
+}
