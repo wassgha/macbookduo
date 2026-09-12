@@ -11,16 +11,29 @@ interface HIDCollectionInfo {
   readonly usage: number;
 }
 
-interface HIDDevice {
+interface HIDInputReportEvent extends Event {
+  readonly device: HIDDevice;
+  readonly reportId: number;
+  /** The report's bytes, excluding the report ID. */
+  readonly data: DataView;
+}
+
+interface HIDDevice extends EventTarget {
   readonly opened: boolean;
   readonly collections: readonly HIDCollectionInfo[];
+  addEventListener(
+    type: "inputreport",
+    listener: (event: HIDInputReportEvent) => void,
+  ): void;
+  removeEventListener(
+    type: "inputreport",
+    listener: (event: HIDInputReportEvent) => void,
+  ): void;
   readonly vendorId: number;
   readonly productId: number;
   readonly productName: string;
   open(): Promise<void>;
   close(): Promise<void>;
-  /** Resolves with the report's bytes. In Chromium, byte 0 is the report ID. */
-  receiveFeatureReport(reportId: number): Promise<DataView>;
 }
 
 interface HIDDeviceFilter {
